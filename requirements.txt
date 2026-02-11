@@ -3,6 +3,5 @@ langchain-openai
 langchain-community
 chromadb
 pypdf
-duckduckgo-search
 pillow
 requests
