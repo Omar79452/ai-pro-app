@@ -3,10 +3,6 @@ import sqlite3
 import hashlib
 from datetime import datetime
 import json
-import os
-from io import BytesIO
-import requests
-from PIL import Image
 
 # Optional analytics
 try:
@@ -18,11 +14,9 @@ except:
 
 # LangChain
 try:
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-    from langchain_community.vectorstores import FAISS
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_core.callbacks import BaseCallbackHandler
     LANGCHAIN_AVAILABLE = True
 except:
     LANGCHAIN_AVAILABLE = False
@@ -32,7 +26,7 @@ except:
 # CONFIG
 # =====================================================
 
-st.set_page_config(page_title="AI Pro Enterprise++", layout="wide")
+st.set_page_config(page_title="AI Pro Enterprise+", layout="wide")
 
 st.markdown("""
 <style>
@@ -65,6 +59,29 @@ APP_PASSWORD = st.secrets.get("APP_PASSWORD", "admin123")
 
 
 # =====================================================
+# DATABASE
+# =====================================================
+
+@st.cache_resource
+def init_db():
+    conn = sqlite3.connect("ai_pro_plus.db", check_same_thread=False)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chats (
+            id INTEGER PRIMARY KEY,
+            session_id TEXT,
+            role TEXT,
+            content TEXT,
+            tokens INTEGER,
+            timestamp TEXT
+        )
+    """)
+    conn.commit()
+    return conn
+
+db = init_db()
+
+
+# =====================================================
 # SESSION INIT
 # =====================================================
 
@@ -73,11 +90,11 @@ def init_session():
         "logged_in": False,
         "session_id": hashlib.md5(str(datetime.now()).encode()).hexdigest()[:10],
         "messages": [],
-        "vectorstore": None,
-        "rag_enabled": False,
         "model_name": "openai/gpt-4o-mini",
         "temperature": 0.7,
-        "system_prompt": "You are a professional AI assistant."
+        "system_prompt": "You are a professional AI assistant.",
+        "context_window": 8,
+        "total_tokens": 0
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -87,11 +104,59 @@ init_session()
 
 
 # =====================================================
+# TOKEN CALLBACK
+# =====================================================
+
+class TokenCounter(BaseCallbackHandler):
+    def __init__(self):
+        self.total_tokens = 0
+
+    def on_llm_end(self, response, **kwargs):
+        try:
+            self.total_tokens += response.llm_output["token_usage"]["total_tokens"]
+        except:
+            pass
+
+
+# =====================================================
+# DB FUNCTIONS
+# =====================================================
+
+def load_history():
+    cursor = db.execute(
+        "SELECT role, content, tokens FROM chats WHERE session_id=? ORDER BY id",
+        (st.session_state.session_id,)
+    )
+    rows = cursor.fetchall()
+    st.session_state.messages = [
+        {"role": r[0], "content": r[1], "tokens": r[2]} for r in rows
+    ]
+    st.session_state.total_tokens = sum(r[2] for r in rows if r[2])
+
+if not st.session_state.messages:
+    load_history()
+
+
+def save_message(role, content, tokens):
+    db.execute(
+        "INSERT INTO chats (session_id, role, content, tokens, timestamp) VALUES (?, ?, ?, ?, ?)",
+        (
+            st.session_state.session_id,
+            role,
+            content,
+            tokens,
+            datetime.now().isoformat()
+        )
+    )
+    db.commit()
+
+
+# =====================================================
 # LLM INIT
 # =====================================================
 
 llm = None
-embeddings = None
+token_handler = TokenCounter()
 
 if LANGCHAIN_AVAILABLE and OPENROUTER_API_KEY:
     try:
@@ -100,14 +165,8 @@ if LANGCHAIN_AVAILABLE and OPENROUTER_API_KEY:
             temperature=st.session_state.temperature,
             base_url="https://openrouter.ai/api/v1",
             api_key=OPENROUTER_API_KEY,
+            callbacks=[token_handler]
         )
-
-        embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY,
-        )
-
     except Exception as e:
         st.error(f"LLM init error: {e}")
 
@@ -117,7 +176,7 @@ if LANGCHAIN_AVAILABLE and OPENROUTER_API_KEY:
 # =====================================================
 
 if not st.session_state.logged_in:
-    st.title("AI Pro Enterprise++")
+    st.title("AI Pro Enterprise+")
     pwd = st.text_input("Password", type="password")
 
     if st.button("Login"):
@@ -135,19 +194,28 @@ if not st.session_state.logged_in:
 # =====================================================
 
 with st.sidebar:
-    st.header("Navigation")
+    st.header("Control Panel")
 
-    page = st.radio("Go to", [
+    page = st.radio("Navigation", [
         "Chat",
-        "RAG",
-        "Image Generation",
+        "Analytics",
         "Settings"
     ])
 
     st.divider()
+    st.metric("Messages", len(st.session_state.messages))
+    st.metric("Total Tokens", st.session_state.total_tokens)
+
+    if st.button("Export Chat"):
+        export_data = json.dumps(st.session_state.messages, indent=2)
+        st.download_button("Download JSON", export_data, "chat_export.json")
 
     if st.button("Clear Chat"):
+        db.execute("DELETE FROM chats WHERE session_id=?",
+                   (st.session_state.session_id,))
+        db.commit()
         st.session_state.messages = []
+        st.session_state.total_tokens = 0
         st.rerun()
 
     if st.button("Logout"):
@@ -156,119 +224,101 @@ with st.sidebar:
 
 
 # =====================================================
+# MAIN
+# =====================================================
+
+st.title("🚀 AI Pro Enterprise+")
+
+
+# =====================================================
 # CHAT
 # =====================================================
 
 if page == "Chat":
 
-    st.title("💬 AI Chat")
-
     if not llm:
-        st.warning("Add OPENROUTER_API_KEY to secrets.")
+        st.warning("Set OPENROUTER_API_KEY in secrets.")
         st.stop()
 
-    for msg in st.session_state.messages:
+    for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            if st.button("Delete", key=f"del_{i}"):
+                db.execute("DELETE FROM chats WHERE session_id=? AND content=?",
+                           (st.session_state.session_id, msg["content"]))
+                db.commit()
+                st.session_state.messages.pop(i)
+                st.rerun()
 
     if prompt := st.chat_input("Ask something..."):
 
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({"role": "user", "content": prompt, "tokens": 0})
+        save_message("user", prompt, 0)
 
         with st.chat_message("assistant"):
             placeholder = st.empty()
-            full = ""
+            full_response = ""
 
             messages = [SystemMessage(content=st.session_state.system_prompt)]
 
-            # RAG context if enabled
-            if st.session_state.rag_enabled and st.session_state.vectorstore:
-                docs = st.session_state.vectorstore.similarity_search(prompt, k=3)
-                context = "\n\n".join([d.page_content for d in docs])
-                messages.append(SystemMessage(content=f"Context:\n{context}"))
-
-            for m in st.session_state.messages[-6:]:
+            for m in st.session_state.messages[-st.session_state.context_window:]:
                 if m["role"] == "user":
                     messages.append(HumanMessage(content=m["content"]))
                 else:
                     messages.append(AIMessage(content=m["content"]))
 
-            for chunk in llm.stream(messages):
-                full += chunk.content or ""
-                placeholder.markdown(full + "▌")
-
-            placeholder.markdown(full)
-
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": full
-            })
-
-
-# =====================================================
-# RAG
-# =====================================================
-
-elif page == "RAG":
-
-    st.title("📄 Document RAG")
-
-    if not embeddings:
-        st.warning("Embeddings not available.")
-        st.stop()
-
-    uploaded_file = st.file_uploader("Upload PDF or TXT", type=["pdf", "txt"])
-
-    if uploaded_file:
-
-        with st.spinner("Processing document..."):
-
-            if uploaded_file.type == "application/pdf":
-                with open("temp.pdf", "wb") as f:
-                    f.write(uploaded_file.read())
-                loader = PyPDFLoader("temp.pdf")
-                documents = loader.load()
-            else:
-                text = uploaded_file.read().decode("utf-8")
-                documents = [{"page_content": text}]
-
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200
-            )
-
-            docs = splitter.split_documents(documents)
-
-            vectorstore = FAISS.from_documents(docs, embeddings)
-            st.session_state.vectorstore = vectorstore
-            st.session_state.rag_enabled = True
-
-            st.success("RAG enabled. You can now ask questions in Chat.")
-
-
-# =====================================================
-# IMAGE GENERATION
-# =====================================================
-
-elif page == "Image Generation":
-
-    st.title("🖼️ AI Image Generation")
-
-    prompt = st.text_area("Describe your image", height=100)
-
-    size = st.selectbox("Size", ["512x512", "1024x1024"])
-
-    if st.button("Generate Image") and prompt:
-
-        with st.spinner("Generating image..."):
-
             try:
-                clean_prompt = prompt.replace(" ", "%20")
-                url = f"https://image.pollinations.ai/prompt/{clean_prompt}?width={size.split('x')[0]}&height={size.split('x')[1]}"
-                img = Image.open(BytesIO(requests.get(url, timeout=30).content))
-                st.image(img, caption=prompt, use_column_width=True)
+                for chunk in llm.stream(messages):
+                    full_response += chunk.content or ""
+                    placeholder.markdown(full_response + "▌")
+
+                placeholder.markdown(full_response)
+
+                tokens_used = token_handler.total_tokens
+                st.session_state.total_tokens += tokens_used
+
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": full_response,
+                    "tokens": tokens_used
+                })
+
+                save_message("assistant", full_response, tokens_used)
+
             except Exception as e:
-                st.error(f"Image generation failed: {e}")
+                placeholder.markdown(f"Error: {e}")
+
+
+# =====================================================
+# ANALYTICS
+# =====================================================
+
+elif page == "Analytics":
+
+    st.header("Usage Analytics")
+
+    cursor = db.execute("""
+        SELECT DATE(timestamp), COUNT(*)
+        FROM chats
+        GROUP BY DATE(timestamp)
+        ORDER BY DATE(timestamp)
+    """)
+    rows = cursor.fetchall()
+
+    if rows and ANALYTICS_AVAILABLE:
+        df = pd.DataFrame(rows, columns=["Date", "Messages"])
+        fig = px.line(df, x="Date", y="Messages", title="Messages per Day")
+        st.plotly_chart(fig, use_container_width=True)
+
+        role_df = pd.read_sql_query(
+            "SELECT role, COUNT(*) as count FROM chats GROUP BY role",
+            db
+        )
+        fig2 = px.pie(role_df, names="role", values="count", title="Role Distribution")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    else:
+        st.info("No analytics data yet.")
 
 
 # =====================================================
@@ -277,7 +327,7 @@ elif page == "Image Generation":
 
 elif page == "Settings":
 
-    st.title("⚙️ Settings")
+    st.header("Model Settings")
 
     st.session_state.model_name = st.selectbox(
         "Model",
@@ -289,6 +339,13 @@ elif page == "Settings":
         0.0,
         1.0,
         st.session_state.temperature
+    )
+
+    st.session_state.context_window = st.slider(
+        "Context Window (messages)",
+        3,
+        20,
+        st.session_state.context_window
     )
 
     st.session_state.system_prompt = st.text_area(
