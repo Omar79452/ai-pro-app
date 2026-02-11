@@ -15,7 +15,7 @@ import sqlite3
 # === CONFIG ===
 st.set_page_config(page_title="🚀 AI Pro", page_icon="🚀", layout="wide")
 
-# === PREMIUM CSS - GOLD/BLACK THEME ===
+# === PREMIUM CSS - GOLD/BLACK ENTERPRISE THEME ===
 st.markdown("""
 <style>
 /* ENTERPRISE GOLD/BLACK THEME */
@@ -37,9 +37,15 @@ h2, h3 {color: #ffd700 !important;}
 </style>
 """, unsafe_allow_html=True)
 
-# === SECRETS ===
-OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
-APP_PASSWORD = st.secrets.get("APP_PASSWORD", "ai123")
+# === SECRETS (SAFE - Won't crash if missing) ===
+try:
+    OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+except:
+    OPENROUTER_API_KEY = None
+try:
+    APP_PASSWORD = st.secrets["APP_PASSWORD"]
+except:
+    APP_PASSWORD = "ai123"
 
 # === DATABASE ===
 @st.cache_resource
@@ -54,13 +60,17 @@ def init_db():
 # === LLM & TOOLS ===
 @st.cache_resource
 def get_llm(temp=0.7):
-    return ChatOpenAI(model="openai/gpt-4o-mini", temperature=temp, 
-                     base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY, max_retries=3)
+    if OPENROUTER_API_KEY:
+        return ChatOpenAI(model="openai/gpt-4o-mini", temperature=temp, 
+                         base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY, max_retries=3)
+    return None
 
 @st.cache_resource
 def get_embeddings():
-    return OpenAIEmbeddings(model="text-embedding-3-small", 
-                           openai_api_base="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+    if OPENROUTER_API_KEY:
+        return OpenAIEmbeddings(model="text-embedding-3-small", 
+                               openai_api_base="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+    return None
 
 llm = get_llm()
 search = DuckDuckGoSearchRun()
@@ -91,7 +101,7 @@ if "logged_in" not in st.session_state:
 
 if not st.session_state.logged_in:
     st.markdown("<h1>🔐 AI Pro Assistant</h1>", unsafe_allow_html=True)
-    st.markdown("<h2 style='text-align:center; color:#ffd700;'>Enter Password to Access</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; color:#ffd700;'>Enter Password to Access Enterprise Features</h2>", unsafe_allow_html=True)
     
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -102,11 +112,11 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.rerun()
             else:
-                st.error("❌ Wrong Password!")
+                st.error("❌ Wrong Password! Check Streamlit Secrets.")
     st.stop()
 
 # === SIDEBAR ===
-st.sidebar.markdown("### 👋 Welcome to AI Pro!")
+st.sidebar.markdown("### 👋 Welcome to **AI Pro**!")
 st.sidebar.button("🚪 Logout", on_click=lambda: setattr(st.session_state, 'logged_in', False) or st.rerun())
 
 # === MAIN PAGES ===
@@ -115,70 +125,74 @@ page = st.sidebar.selectbox("📱 Navigate",
                             "💻 Code Runner", "📊 Analytics", "⚙️ Settings"])
 
 st.markdown("<h1>🚀 AI Pro Assistant</h1>", unsafe_allow_html=True)
-st.markdown("*Enterprise-grade AI toolkit with RAG, Web Search, Code Execution & Analytics*")
+st.markdown("*Enterprise-grade AI toolkit: ChatGPT + RAG + Web Search + Images + Code + Analytics*")
 
 # === SMART CHAT ===
 if page == "💬 Smart Chat":
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "👋 Welcome to Smart Chat! Ask me anything..."}]
-    
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-    
-    if prompt := st.chat_input("💭 Ask anything..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    if llm:
+        if "messages" not in st.session_state:
+            st.session_state.messages = [{"role": "assistant", "content": "👋 Welcome to Smart Chat! Ask me anything..."}]
         
-        with st.chat_message("assistant"):
-            with st.spinner("🤔 Thinking..."):
-                resp = llm.invoke([HumanMessage(content=prompt)]).content
-            st.markdown(resp)
-            st.session_state.messages.append({"role": "assistant", "content": resp})
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+        
+        if prompt := st.chat_input("💭 Ask anything..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
             
-            # Save to DB
-            for role, content in [("user", prompt), ("assistant", resp)]:
-                db.execute("INSERT INTO chats (user, timestamp, role, content) VALUES (?, ?, ?, ?)",
-                          ("user", datetime.now().isoformat(), role, content))
-            db.commit()
+            with st.chat_message("assistant"):
+                with st.spinner("🤔 Thinking..."):
+                    resp = llm.invoke([HumanMessage(content=prompt)]).content
+                st.markdown(resp)
+                st.session_state.messages.append({"role": "assistant", "content": resp})
+                
+                # Save to DB
+                for role, content in [("user", prompt), ("assistant", resp)]:
+                    db.execute("INSERT INTO chats (user, timestamp, role, content) VALUES (?, ?, ?, ?)",
+                              ("user", datetime.now().isoformat(), role, content))
+                db.commit()
+    else:
+        st.warning("❌ OpenRouter API key missing. Add to Streamlit Secrets.")
 
 # === DOCUMENT RAG ===
 elif page == "📄 Document RAG":
-    st.header("📄 Document Q&A (RAG)")
-    uploaded_file = st.file_uploader("📎 Upload PDF/TXT", type=['pdf','txt'])
-    
-    if uploaded_file:
-        file_hash = hashlib.md5(uploaded_file.getvalue()).hexdigest()
-        if "file_hashes" not in st.session_state:
-            st.session_state.file_hashes = set()
+    if embeddings and llm:
+        st.header("📄 Document Q&A (RAG)")
+        uploaded_file = st.file_uploader("📎 Upload PDF/TXT", type=['pdf','txt'])
         
-        if file_hash not in st.session_state.file_hashes:
-            with st.spinner("🔄 Processing document..."):
-                try:
-                    if uploaded_file.name.endswith('.pdf'):
-                        docs = PyPDFLoader(uploaded_file).load()
-                    else:
-                        docs = TextLoader(uploaded_file, encoding="utf-8").load()
-                    
-                    st.session_state.vectorstore = Chroma.from_documents(
-                        docs, embeddings, persist_directory="/tmp/chroma_db"
-                    )
-                    st.session_state.file_hashes.add(file_hash)
-                    st.success("✅ Document loaded into memory!")
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
-        
-        if "vectorstore" in st.session_state and st.session_state.vectorstore:
-            query = st.text_input("❓ Ask about your document:")
-            if st.button("🔍 Query Document", use_container_width=True) and query:
-                with st.spinner("🔍 Searching document..."):
-                    retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
-                    docs = retriever.invoke(query)
-                    context = "\n\n".join([doc.page_content for doc in docs])
-                    
-                    resp = llm.invoke([
-                        HumanMessage(content=f"""Use ONLY the following context to answer:
+        if uploaded_file:
+            file_hash = hashlib.md5(uploaded_file.getvalue()).hexdigest()
+            if "file_hashes" not in st.session_state:
+                st.session_state.file_hashes = set()
+            
+            if file_hash not in st.session_state.file_hashes:
+                with st.spinner("🔄 Processing document..."):
+                    try:
+                        if uploaded_file.name.endswith('.pdf'):
+                            docs = PyPDFLoader(uploaded_file).load()
+                        else:
+                            docs = TextLoader(uploaded_file, encoding="utf-8").load()
+                        
+                        st.session_state.vectorstore = Chroma.from_documents(
+                            docs, embeddings, persist_directory="/tmp/chroma_db"
+                        )
+                        st.session_state.file_hashes.add(file_hash)
+                        st.success("✅ Document loaded into memory!")
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+            
+            if "vectorstore" in st.session_state and st.session_state.vectorstore:
+                query = st.text_input("❓ Ask about your document:")
+                if st.button("🔍 Query Document", use_container_width=True) and query:
+                    with st.spinner("🔍 Searching document..."):
+                        retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
+                        docs = retriever.invoke(query)
+                        context = "\n\n".join([doc.page_content for doc in docs])
+                        
+                        resp = llm.invoke([
+                            HumanMessage(content=f"""Use ONLY the following context to answer:
 
 CONTEXT:
 {context}
@@ -186,8 +200,10 @@ CONTEXT:
 Question: {query}
 
 Answer based ONLY on context above:""")
-                    ]).content
-                    st.markdown(f"**📄 Answer:** {resp}")
+                        ]).content
+                        st.markdown(f"**📄 Answer:** {resp}")
+    else:
+        st.warning("❌ OpenRouter API key missing for RAG. Add to Secrets.")
 
 # === WEB SEARCH ===
 elif page == "🔍 Web Search":
@@ -195,8 +211,11 @@ elif page == "🔍 Web Search":
     query = st.text_input("🔍 Search the web:")
     if st.button("🚀 Search Internet", use_container_width=True) and query:
         with st.spinner("🌐 Searching internet..."):
-            results = search.run(query)
-            st.markdown(f"**🔗 Results:** {results}")
+            try:
+                results = search.run(query)
+                st.markdown(f"**🔗 Results:** {results}")
+            except Exception as e:
+                st.error(f"❌ Search error: {e}")
 
 # === AI IMAGES ===
 elif page == "🖼️ AI Images":
@@ -208,7 +227,7 @@ elif page == "🖼️ AI Images":
             if img:
                 st.image(img, caption=prompt, use_column_width=True)
             else:
-                st.error("❌ Image generation failed. Try again!")
+                st.error("❌ Image generation failed.")
 
 # === CODE RUNNER ===
 elif page == "💻 Code Runner":
@@ -239,19 +258,21 @@ elif page == "📊 Analytics":
 
 # === SETTINGS ===
 elif page == "⚙️ Settings":
-    st.header("⚙️ App Settings")
-    st.success("✅ **Production Ready Features:**")
+    st.header("⚙️ Enterprise Features")
+    st.success("✅ **Production Ready:**")
     st.markdown("""
     - 🔐 **Password Protection** (Streamlit Secrets)
-    - 💾 **Chat History** (SQLite database)
-    - 📄 **Document RAG** (Chroma vector DB)
-    - 🌐 **Web Search** (DuckDuckGo)
-    - 🖼️ **AI Images** (Pollinations API)
-    - 💻 **Code Execution** (Secure sandbox)
+    - 💾 **SQLite Chat History**
+    - 📄 **ChromaDB RAG** (PDF/TXT)
+    - 🌐 **DuckDuckGo Web Search**
+    - 🖼️ **Pollinations AI Images**
+    - 💻 **Secure Python Sandbox**
     - 📊 **Real-time Analytics**
-    - 🎨 **Premium UI/UX** (Gold/Black theme)
-    - ⚡ **Cached Components** (Fast loading)
+    - 🎨 **Premium Gold/Black UI**
+    - ⚡ **Smart Caching**
     """)
+    
+    st.info("**Secrets needed:** OPENROUTER_API_KEY + APP_PASSWORD")
 
 st.markdown("---")
-st.markdown("*🌟 Enterprise AI Pro Assistant | Production Ready | Deployed on Streamlit Cloud*")
+st.markdown("*🌟 AI Pro Assistant | Enterprise AI Toolkit | Streamlit Cloud*")
