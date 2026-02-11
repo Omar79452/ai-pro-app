@@ -9,7 +9,7 @@ try:
     import pandas as pd
     import plotly.express as px
     ANALYTICS_AVAILABLE = True
-except ImportError:
+except:
     ANALYTICS_AVAILABLE = False
 
 # LangChain
@@ -17,8 +17,9 @@ try:
     from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
     LANGCHAIN_AVAILABLE = True
-except ImportError:
+except:
     LANGCHAIN_AVAILABLE = False
+
 
 # =====================================================
 # CONFIG
@@ -52,6 +53,7 @@ section[data-testid="stSidebar"] { background-color: #111827; }
 </style>
 """, unsafe_allow_html=True)
 
+
 # =====================================================
 # SECRETS
 # =====================================================
@@ -59,30 +61,28 @@ section[data-testid="stSidebar"] { background-color: #111827; }
 OPENROUTER_API_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
 APP_PASSWORD = st.secrets.get("APP_PASSWORD", "admin123")
 
+
 # =====================================================
 # DATABASE
 # =====================================================
 
 @st.cache_resource
 def init_db():
-    try:
-        conn = sqlite3.connect("ai_pro.db", check_same_thread=False)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS chats (
-                id INTEGER PRIMARY KEY,
-                session_id TEXT,
-                role TEXT,
-                content TEXT,
-                timestamp TEXT
-            )
-        """)
-        conn.commit()
-        return conn
-    except sqlite3.Error as e:
-        st.error(f"Database error: {e}")
-        return None
+    conn = sqlite3.connect("ai_pro.db", check_same_thread=False)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chats (
+            id INTEGER PRIMARY KEY,
+            session_id TEXT,
+            role TEXT,
+            content TEXT,
+            timestamp TEXT
+        )
+    """)
+    conn.commit()
+    return conn
 
 db = init_db()
+
 
 # =====================================================
 # SESSION INIT
@@ -102,40 +102,37 @@ def init_session():
 
 init_session()
 
+
 # =====================================================
 # LOAD CHAT HISTORY FROM DB
 # =====================================================
 
 def load_history():
-    try:
-        cursor = db.execute(
-            "SELECT role, content FROM chats WHERE session_id=? ORDER BY id",
-            (st.session_state.session_id,)
-        )
-        rows = cursor.fetchall()
-        st.session_state.messages = [
-            {"role": r[0], "content": r[1]} for r in rows
-        ]
-    except sqlite3.Error as e:
-        st.error(f"Error loading chat history: {e}")
+    cursor = db.execute(
+        "SELECT role, content FROM chats WHERE session_id=? ORDER BY id",
+        (st.session_state.session_id,)
+    )
+    rows = cursor.fetchall()
+    st.session_state.messages = [
+        {"role": r[0], "content": r[1]} for r in rows
+    ]
 
 if not st.session_state.messages:
     load_history()
 
+
 def save_message(role, content):
-    try:
-        db.execute(
-            "INSERT INTO chats (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-            (
-                st.session_state.session_id,
-                role,
-                content,
-                datetime.now().isoformat()
-            )
+    db.execute(
+        "INSERT INTO chats (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+        (
+            st.session_state.session_id,
+            role,
+            content,
+            datetime.now().isoformat()
         )
-        db.commit()
-    except sqlite3.Error as e:
-        st.error(f"Error saving message: {e}")
+    )
+    db.commit()
+
 
 # =====================================================
 # LLM INIT
@@ -154,6 +151,7 @@ if LANGCHAIN_AVAILABLE and OPENROUTER_API_KEY:
     except Exception as e:
         st.error(f"LLM init error: {e}")
 
+
 # =====================================================
 # LOGIN
 # =====================================================
@@ -165,12 +163,12 @@ if not st.session_state.logged_in:
     if st.button("Login"):
         if pwd == APP_PASSWORD:
             st.session_state.logged_in = True
-            st.success("Login successful!")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Invalid password")
 
     st.stop()
+
 
 # =====================================================
 # SIDEBAR
@@ -197,19 +195,19 @@ with st.sidebar:
         )
         db.commit()
         st.session_state.messages = []
-        st.success("Chat cleared!")
-        st.experimental_rerun()
+        st.rerun()
 
     if st.button("Logout"):
         st.session_state.clear()
-        st.success("Logged out successfully!")
-        st.experimental_rerun()
+        st.rerun()
+
 
 # =====================================================
 # MAIN
 # =====================================================
 
 st.title("🚀 AI Pro Enterprise")
+
 
 # =====================================================
 # CHAT
@@ -261,6 +259,7 @@ if page == "Chat":
             except Exception as e:
                 placeholder.markdown(f"Error: {e}")
 
+
 # =====================================================
 # ANALYTICS
 # =====================================================
@@ -269,26 +268,24 @@ elif page == "Analytics":
 
     st.header("Usage Analytics")
 
-    try:
-        cursor = db.execute("""
-            SELECT DATE(timestamp) as day, COUNT(*) 
-            FROM chats 
-            GROUP BY day
-            ORDER BY day
-        """)
+    cursor = db.execute("""
+        SELECT DATE(timestamp) as day, COUNT(*) 
+        FROM chats 
+        GROUP BY day
+        ORDER BY day
+    """)
 
-        rows = cursor.fetchall()
+    rows = cursor.fetchall()
 
-        if rows and ANALYTICS_AVAILABLE:
-            df = pd.DataFrame(rows, columns=["Date", "Messages"])
-            fig = px.line(df, x="Date", y="Messages", title="Messages per Day")
-            st.plotly_chart(fig, use_container_width=True)
-        elif rows:
-            st.write(rows)
-        else:
-            st.info("No data yet.")
-    except sqlite3.Error as e:
-        st.error(f"Error fetching analytics data: {e}")
+    if rows and ANALYTICS_AVAILABLE:
+        df = pd.DataFrame(rows, columns=["Date", "Messages"])
+        fig = px.line(df, x="Date", y="Messages", title="Messages per Day")
+        st.plotly_chart(fig, use_container_width=True)
+    elif rows:
+        st.write(rows)
+    else:
+        st.info("No data yet.")
+
 
 # =====================================================
 # SETTINGS
