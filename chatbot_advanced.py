@@ -1,176 +1,101 @@
 import streamlit as st
-import hashlib
 import sqlite3
+import hashlib
 from datetime import datetime
-from io import BytesIO
-from PIL import Image
-import requests
-import sys
 import os
-import json
-import time
 
-# Optional deps
-PLOTLY_AVAILABLE = False
-PANDAS_AVAILABLE = False
+# Optional analytics
 try:
     import pandas as pd
     import plotly.express as px
-    PLOTLY_AVAILABLE = True
-    PANDAS_AVAILABLE = True
-except ImportError:
-    pass
+    ANALYTICS_AVAILABLE = True
+except:
+    ANALYTICS_AVAILABLE = False
 
+# LangChain
 try:
     from langchain_openai import ChatOpenAI
-    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
     LANGCHAIN_AVAILABLE = True
-except ImportError:
+except:
     LANGCHAIN_AVAILABLE = False
 
 
-# ==============================
-# PAGE CONFIG
-# ==============================
+# =====================================================
+# CONFIG
+# =====================================================
 
 st.set_page_config(
     page_title="AI Pro Enterprise",
     page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="wide"
 )
 
-# ==============================
-# CLEAN PROFESSIONAL DARK THEME
-# ==============================
-
+# Clean dark theme
 st.markdown("""
 <style>
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-html, body, [class*="css"]  {
-    font-family: 'Inter', sans-serif;
-}
-
-/* Main background */
-.stApp {
-    background-color: #0f172a;
-    color: #e2e8f0;
-}
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-    background-color: #111827;
-    border-right: 1px solid #1f2937;
-}
-
-/* Headers */
-h1, h2, h3 {
-    color: #f8fafc !important;
-    font-weight: 600 !important;
-}
-
-/* Cards */
-.card {
-    background-color: #111827;
-    padding: 24px;
-    border-radius: 12px;
-    border: 1px solid #1f2937;
-    margin-bottom: 20px;
-}
-
-/* Chat messages */
-.stChatMessage {
+.stApp { background-color: #0f172a; color: #e2e8f0; }
+section[data-testid="stSidebar"] { background-color: #111827; }
+.stChatMessage { 
     background-color: #1e293b !important;
-    border-radius: 12px !important;
-    padding: 16px !important;
-    border: 1px solid #334155 !important;
-    color: #e2e8f0 !important;
+    border-radius: 10px !important;
+    padding: 15px !important;
 }
-
 .stChatMessage[data-testid="user"] {
-    background-color: #1d4ed8 !important;
+    background-color: #2563eb !important;
     color: white !important;
-    border: none !important;
 }
-
-/* Buttons */
 .stButton > button {
     background-color: #2563eb !important;
     color: white !important;
     border-radius: 8px !important;
-    border: none !important;
-    padding: 10px 18px !important;
-    font-weight: 500 !important;
 }
-
-.stButton > button:hover {
-    background-color: #1d4ed8 !important;
-}
-
-/* Inputs */
-input, textarea {
-    background-color: #1e293b !important;
-    color: white !important;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
 
-# ==============================
+# =====================================================
 # SECRETS
-# ==============================
+# =====================================================
 
-try:
-    OPENROUTER_API_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
-    APP_PASSWORD = st.secrets.get("APP_PASSWORD", "admin123")
-except:
-    OPENROUTER_API_KEY = ""
-    APP_PASSWORD = "admin123"
+OPENROUTER_API_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
+APP_PASSWORD = st.secrets.get("APP_PASSWORD", "admin123")
 
 
-# ==============================
+# =====================================================
 # DATABASE
-# ==============================
+# =====================================================
 
 @st.cache_resource
 def init_db():
     conn = sqlite3.connect("ai_pro.db", check_same_thread=False)
-    c = conn.cursor()
-
-    c.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS chats (
             id INTEGER PRIMARY KEY,
             session_id TEXT,
             role TEXT,
             content TEXT,
-            tokens INTEGER,
             timestamp TEXT
         )
     """)
-
     conn.commit()
     return conn
 
 db = init_db()
 
 
-# ==============================
+# =====================================================
 # SESSION INIT
-# ==============================
+# =====================================================
 
 def init_session():
     defaults = {
         "logged_in": False,
         "session_id": hashlib.md5(str(datetime.now()).encode()).hexdigest()[:10],
         "messages": [],
-        "total_tokens": 0,
-        "temperature": 0.7,
         "model_name": "openai/gpt-4o-mini",
+        "temperature": 0.7
     }
-
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -178,9 +103,40 @@ def init_session():
 init_session()
 
 
-# ==============================
+# =====================================================
+# LOAD CHAT HISTORY FROM DB
+# =====================================================
+
+def load_history():
+    cursor = db.execute(
+        "SELECT role, content FROM chats WHERE session_id=? ORDER BY id",
+        (st.session_state.session_id,)
+    )
+    rows = cursor.fetchall()
+    st.session_state.messages = [
+        {"role": r[0], "content": r[1]} for r in rows
+    ]
+
+if not st.session_state.messages:
+    load_history()
+
+
+def save_message(role, content):
+    db.execute(
+        "INSERT INTO chats (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+        (
+            st.session_state.session_id,
+            role,
+            content,
+            datetime.now().isoformat()
+        )
+    )
+    db.commit()
+
+
+# =====================================================
 # LLM INIT
-# ==============================
+# =====================================================
 
 llm = None
 if LANGCHAIN_AVAILABLE and OPENROUTER_API_KEY:
@@ -190,20 +146,18 @@ if LANGCHAIN_AVAILABLE and OPENROUTER_API_KEY:
             temperature=st.session_state.temperature,
             base_url="https://openrouter.ai/api/v1",
             api_key=OPENROUTER_API_KEY,
+            max_retries=2
         )
     except Exception as e:
-        st.error(str(e))
+        st.error(f"LLM init error: {e}")
 
 
-# ==============================
+# =====================================================
 # LOGIN
-# ==============================
+# =====================================================
 
 if not st.session_state.logged_in:
-
-    st.markdown("<h1 style='text-align:center;'>AI Pro Enterprise</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center;color:#94a3b8;'>Secure Access Required</p>", unsafe_allow_html=True)
-
+    st.title("AI Pro Enterprise")
     pwd = st.text_input("Password", type="password")
 
     if st.button("Login"):
@@ -216,13 +170,12 @@ if not st.session_state.logged_in:
     st.stop()
 
 
-# ==============================
+# =====================================================
 # SIDEBAR
-# ==============================
+# =====================================================
 
 with st.sidebar:
-    st.markdown("### Control Panel")
-    st.markdown(f"Session: `{st.session_state.session_id}`")
+    st.header("Control Panel")
 
     page = st.radio("Navigation", [
         "Chat",
@@ -232,100 +185,111 @@ with st.sidebar:
 
     st.divider()
 
-    st.metric("Messages", len(st.session_state.messages))
-    st.metric("Tokens", st.session_state.total_tokens)
+    st.write("Session:", st.session_state.session_id)
+    st.write("Messages:", len(st.session_state.messages))
 
     if st.button("Clear Chat"):
+        db.execute(
+            "DELETE FROM chats WHERE session_id=?",
+            (st.session_state.session_id,)
+        )
+        db.commit()
         st.session_state.messages = []
         st.rerun()
 
     if st.button("Logout"):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
+        st.session_state.clear()
         st.rerun()
 
 
-# ==============================
+# =====================================================
 # MAIN
-# ==============================
+# =====================================================
 
-st.title("AI Pro Enterprise")
+st.title("🚀 AI Pro Enterprise")
 
 
-# ==============================
-# CHAT PAGE
-# ==============================
+# =====================================================
+# CHAT
+# =====================================================
 
 if page == "Chat":
 
-    if llm:
+    if not llm:
+        st.warning("Set OPENROUTER_API_KEY in Streamlit secrets.")
+        st.stop()
 
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+    # Display history
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-        if prompt := st.chat_input("Ask something..."):
+    # New input
+    if prompt := st.chat_input("Ask something..."):
 
-            st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        save_message("user", prompt)
 
-            with st.chat_message("assistant"):
-                placeholder = st.empty()
-                full = ""
+        with st.chat_message("assistant"):
+            placeholder = st.empty()
+            full_response = ""
 
-                try:
-                    messages = [SystemMessage(content="You are a professional AI assistant.")]
+            try:
+                messages = [SystemMessage(content="You are a professional AI assistant.")]
 
-                    for m in st.session_state.messages[-8:]:
-                        if m["role"] == "user":
-                            messages.append(HumanMessage(content=m["content"]))
-                        else:
-                            messages.append(AIMessage(content=m["content"]))
+                for m in st.session_state.messages[-8:]:
+                    if m["role"] == "user":
+                        messages.append(HumanMessage(content=m["content"]))
+                    else:
+                        messages.append(AIMessage(content=m["content"]))
 
-                    for chunk in llm.stream(messages):
-                        full += chunk.content or ""
-                        placeholder.markdown(full + "▌")
+                for chunk in llm.stream(messages):
+                    full_response += chunk.content or ""
+                    placeholder.markdown(full_response + "▌")
 
-                    placeholder.markdown(full)
+                placeholder.markdown(full_response)
 
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": full
-                    })
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": full_response
+                })
 
-                    st.session_state.total_tokens += len(full.split())
+                save_message("assistant", full_response)
 
-                except Exception as e:
-                    placeholder.markdown(f"Error: {e}")
-
-    else:
-        st.warning("Add OPENROUTER_API_KEY to Streamlit secrets.")
+            except Exception as e:
+                placeholder.markdown(f"Error: {e}")
 
 
-# ==============================
+# =====================================================
 # ANALYTICS
-# ==============================
+# =====================================================
 
 elif page == "Analytics":
 
     st.header("Usage Analytics")
 
-    if PLOTLY_AVAILABLE and PANDAS_AVAILABLE:
+    cursor = db.execute("""
+        SELECT DATE(timestamp) as day, COUNT(*) 
+        FROM chats 
+        GROUP BY day
+        ORDER BY day
+    """)
 
-        df = pd.DataFrame({
-            "Day": list(range(1, 31)),
-            "Messages": [len(st.session_state.messages) + i for i in range(30)]
-        })
+    rows = cursor.fetchall()
 
-        fig = px.line(df, x="Day", y="Messages", title="Message Growth")
+    if rows and ANALYTICS_AVAILABLE:
+        df = pd.DataFrame(rows, columns=["Date", "Messages"])
+        fig = px.line(df, x="Date", y="Messages", title="Messages per Day")
         st.plotly_chart(fig, use_container_width=True)
-
+    elif rows:
+        st.write(rows)
     else:
-        st.info("Install pandas + plotly for charts.")
+        st.info("No data yet.")
 
 
-# ==============================
+# =====================================================
 # SETTINGS
-# ==============================
+# =====================================================
 
 elif page == "Settings":
 
@@ -343,12 +307,4 @@ elif page == "Settings":
         st.session_state.temperature
     )
 
-    st.info("Restart app after changing secrets.")
-
-
-# ==============================
-# FOOTER
-# ==============================
-
-st.divider()
-st.caption("AI Pro Enterprise — Production Ready")
+    st.info("Restart app after changing API key.")
