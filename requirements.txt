@@ -1,7 +1,6 @@
 streamlit
 langchain-openai
-langchain-community
-chromadb
-pypdf
 pillow
 requests
+pandas
+plotly
