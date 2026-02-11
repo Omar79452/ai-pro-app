@@ -276,3 +276,4 @@ elif page == "⚙️ Settings":
 
 st.markdown("---")
 st.markdown("*🌟 AI Pro Assistant | Enterprise AI Toolkit | Streamlit Cloud*")
+'search = None  # Fixed DuckDuckGo bug' 
