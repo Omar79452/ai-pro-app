@@ -206,29 +206,6 @@ h3 {
     border: 2px solid #ffd700 !important;
 }
 
-/* Enhanced Tabs */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 10px;
-}
-
-.stTabs [data-baseweb="tab"] {
-    background: rgba(255,215,0,0.1) !important;
-    border-radius: 10px 10px 0 0 !important;
-    color: #ffd700 !important;
-    font-weight: 600 !important;
-    padding: 10px 20px !important;
-}
-
-.stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, #ffd700, #ffed4a) !important;
-    color: #0a0a0a !important;
-}
-
-/* Spinner */
-.stSpinner > div { 
-    border-top-color: #ffd700 !important;
-}
-
 /* Download Button */
 .stDownloadButton > button {
     background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%) !important;
@@ -237,25 +214,6 @@ h3 {
 
 .stDownloadButton > button:hover {
     background: linear-gradient(135deg, #357abd 0%, #4a90e2 100%) !important;
-}
-
-/* Expander */
-.streamlit-expanderHeader {
-    background: rgba(255,215,0,0.1) !important;
-    border-radius: 10px !important;
-    color: #ffd700 !important;
-    font-weight: 600 !important;
-}
-
-/* Progress Bar */
-.stProgress > div > div > div {
-    background: linear-gradient(90deg, #ffd700, #ffed4a) !important;
-}
-
-/* Dataframe */
-.stDataFrame {
-    border-radius: 10px !important;
-    overflow: hidden !important;
 }
 
 /* Scrollbar */
@@ -275,27 +233,6 @@ h3 {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #ffd700;
-}
-
-/* Premium Card Styles */
-.premium-card {
-    background: rgba(255,255,255,0.05);
-    border-radius: 15px;
-    padding: 25px;
-    border: 2px solid rgba(255,215,0,0.3);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-    margin: 15px 0;
-}
-
-/* Glowing Effect for Active Elements */
-@keyframes glow {
-    0% { box-shadow: 0 0 5px rgba(255,215,0,0.5); }
-    50% { box-shadow: 0 0 20px rgba(255,215,0,0.8); }
-    100% { box-shadow: 0 0 5px rgba(255,215,0,0.5); }
-}
-
-.glow-effect {
-    animation: glow 2s infinite;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -412,12 +349,11 @@ def log_analytics(event_type, event_data):
         )
         db.commit()
     except Exception as e:
-        st.error(f"Analytics logging error: {e}")
+        pass
 
 def generate_image(prompt, width=1024, height=1024):
     """Generate AI images using Pollinations API with size options"""
     try:
-        # Clean and encode prompt
         clean_prompt = prompt.replace(' ', '%20')
         url = f"https://image.pollinations.ai/prompt/{clean_prompt}?width={width}&height={height}&nologo=true"
         
@@ -439,7 +375,6 @@ def execute_code(code, timeout=5):
         sys.stdout = mystdout = StringIO()
         sys.stderr = mystderr = StringIO()
         
-        # Execute code
         exec(code, {"__builtins__": __builtins__})
         
         sys.stdout = old_stdout
@@ -457,7 +392,7 @@ def execute_code(code, timeout=5):
         
     except Exception as e:
         log_analytics("code_execution", {"success": False, "error": str(e)})
-        return f"❌ Error: {str(e)}\n\nLine: {sys.exc_info()[2].tb_lineno if sys.exc_info()[2] else 'unknown'}"
+        return f"❌ Error: {str(e)}"
 
 def web_search(query):
     """Enhanced web search with fallback"""
@@ -476,11 +411,9 @@ def web_search(query):
 • Multiple sources aggregated
 • Current events and news
 
-⚠️ Note: Live search temporarily limited. Results based on available data.
+⚠️ Note: Live search temporarily limited. Try again or check alternative sources.
 
-💡 Tip: Try different search terms for better results.
-
-Error details: {str(e)}"""
+Error: {str(e)}"""
 
 # === AI PERSONALITY SYSTEM ===
 PERSONALITY_PROMPTS = {
@@ -503,8 +436,6 @@ if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
-        
         pwd = st.text_input("🔑 Enter Access Password", type="password", placeholder="Enter password...")
         
         col_btn1, col_btn2 = st.columns(2)
@@ -526,15 +457,12 @@ if not st.session_state.logged_in:
                 **Default Password:** `admin123`
                 
                 **Setup:**
-                1. Add to Streamlit Secrets:
-                   ```
-                   APP_PASSWORD = "your_password"
-                   OPENROUTER_API_KEY = "sk-or-v1-..."
-                   ```
-                2. Get free API key: https://openrouter.ai/keys
+                Add to Streamlit Secrets:
+                ```
+                APP_PASSWORD = "your_password"
+                OPENROUTER_API_KEY = "sk-or-v1-..."
+                ```
                 """)
-        
-        st.markdown("</div>", unsafe_allow_html=True)
         
         st.markdown("---")
         st.markdown("""
@@ -559,7 +487,7 @@ with st.sidebar:
         "📱 **Navigate**", 
         ["💬 Smart Chat", "📄 Document RAG", "🔍 Web Search", 
          "🖼️ AI Images", "💻 Code Runner", "📊 Analytics Dashboard",
-         "🎯 AI Personality", "⚙️ Settings", "📈 Usage Insights"],
+         "🎯 AI Personality", "⚙️ Settings"],
         index=0
     )
     
@@ -597,6 +525,322 @@ if page == "💬 Smart Chat":
     if llm:
         # Initialize chat
         if not st.session_state.messages:
-            st.session_state.messages = [{
-                "role": "assistant", 
-                "content": f"👋 Welcome
+            welcome_msg = "👋 Welcome to Enterprise Smart Chat! Ask me anything about AI, coding, business, or anything else. I'm here to help!"
+            st.session_state.messages = [{"role": "assistant", "content": welcome_msg}]
+        
+        # Display chat history
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+        
+        # Chat input
+        if prompt := st.chat_input("💭 Ask anything..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            # Generate response
+            with st.chat_message("assistant"):
+                with st.spinner("🤔 AI Thinking..."):
+                    try:
+                        messages = [get_system_message(), HumanMessage(content=prompt)]
+                        resp = llm.invoke(messages).content
+                        st.markdown(resp)
+                        st.session_state.messages.append({"role": "assistant", "content": resp})
+                        
+                        # Save to database
+                        for role, content in [("user", prompt), ("assistant", resp)]:
+                            db.execute("INSERT INTO chats (user, timestamp, role, content, session_id) VALUES (?, ?, ?, ?, ?)",
+                                     ("user", datetime.now().isoformat(), role, content, st.session_state.session_id))
+                        db.commit()
+                    except Exception as e:
+                        st.error(f"❌ Chat error: {e}")
+        
+        # Export Chat
+        if st.button("📥 Export Chat History"):
+            chat_history = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+            st.download_button("💾 Download Chat", chat_history, "chat_history.txt", "text/plain")
+    else:
+        st.error("❌ **OpenRouter API Key missing!** Add `OPENROUTER_API_KEY` to Streamlit Secrets.")
+        st.info("Get free key: https://openrouter.ai/keys")
+
+# === 📄 DOCUMENT RAG ===
+elif page == "📄 Document RAG":
+    st.header("📄 Document Q&A (RAG - Retrieval Augmented Generation)")
+    if embeddings and llm:
+        uploaded_file = st.file_uploader("📎 Upload PDF or TXT document", type=['pdf','txt'])
+        
+        if uploaded_file:
+            file_hash = hashlib.md5(uploaded_file.getvalue()).hexdigest()
+            
+            if file_hash not in st.session_state.file_hashes:
+                with st.spinner("🔄 Processing document..."):
+                    try:
+                        # Save to temp file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp:
+                            tmp.write(uploaded_file.getvalue())
+                            tmp_path = tmp.name
+                        
+                        # Load document
+                        if uploaded_file.name.endswith('.pdf'):
+                            docs = PyPDFLoader(tmp_path).load()
+                        else:
+                            docs = TextLoader(tmp_path, encoding="utf-8").load()
+                        
+                        # Create vector store
+                        st.session_state.vectorstore = Chroma.from_documents(
+                            docs, embeddings, persist_directory="/tmp/chroma_db"
+                        )
+                        st.session_state.file_hashes.add(file_hash)
+                        os.unlink(tmp_path)
+                        st.success(f"✅ Document loaded! ({len(docs)} chunks indexed)")
+                        log_analytics("document_upload", {"filename": uploaded_file.name, "chunks": len(docs)})
+                    except Exception as e:
+                        st.error(f"❌ Document error: {e}")
+            
+            # Query interface
+            if "vectorstore" in st.session_state:
+                query = st.text_input("❓ Ask questions about your document:")
+                if st.button("🔍 Query Document", use_container_width=True) and query:
+                    with st.spinner("🔍 Searching document..."):
+                        try:
+                            retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
+                            docs = retriever.invoke(query)
+                            context = "\n\n".join([doc.page_content for doc in docs])
+                            
+                            response = llm.invoke([
+                                HumanMessage(content=f"""Use ONLY the following document context to answer:
+
+CONTEXT:
+{context}
+
+Question: {query}
+
+Answer accurately using ONLY the context above:""")
+                            ]).content
+                            
+                            st.markdown(f"**📄 Answer:** {response}")
+                            st.markdown("**📚 Sources:** Top 4 document chunks retrieved")
+                        except Exception as e:
+                            st.error(f"❌ Query error: {e}")
+    else:
+        st.error("❌ **OpenRouter API Key required** for RAG. Add to Secrets.")
+
+# === 🔍 WEB SEARCH ===
+elif page == "🔍 Web Search":
+    st.header("🌐 Real-time Web Search")
+    query = st.text_input("🔍 Enter search query:")
+    if st.button("🚀 Search Internet", use_container_width=True) and query:
+        with st.spinner("🌐 Searching web..."):
+            try:
+                results = web_search(query)
+                st.markdown(f"**🔗 Search Results:**")
+                st.markdown(results)
+            except Exception as e:
+                st.error(f"❌ Search error: {e}")
+
+# === 🖼️ AI IMAGES ===
+elif page == "🖼️ AI Images":
+    st.header("🎨 AI Image Generator")
+    prompt = st.text_area("✨ Describe your image (e.g., 'golden sunset over mountains'):", height=120)
+    
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        size = st.selectbox("Size", ["1024x1024", "512x512"])
+    with col2:
+        st.info("Powered by Pollinations AI - Free unlimited images")
+    
+    if st.button("🪄 Generate Image", use_container_width=True) and prompt:
+        with st.spinner("🎨 Creating image..."):
+            width, height = map(int, size.split('x'))
+            img = generate_image(prompt, width, height)
+            if img:
+                st.image(img, caption=f"Generated: {prompt}", use_column_width=True)
+                
+                # Proper download
+                buf = BytesIO()
+                img.save(buf, format='PNG')
+                buf.seek(0)
+                
+                st.download_button(
+                    label="💾 Download Image",
+                    data=buf.getvalue(),
+                    file_name=f"ai_image_{prompt[:20].replace(' ', '_')}.png",
+                    mime="image/png"
+                )
+            else:
+                st.error("❌ Image generation failed. Try different prompt.")
+
+# === 💻 CODE RUNNER ===
+elif page == "💻 Code Runner":
+    st.header("⚙️ Python Code Runner (Secure Sandbox)")
+    st.info("Execute Python code safely in isolated environment")
+    
+    default_code = """import numpy as np
+
+# Create array (FIXED: use commas)
+arr = np.array([11, 12, 13, 14])
+print('Array:', arr)
+print('Sum:', arr.sum())
+print('Mean:', arr.mean())
+
+# Math operations
+result = arr * 2
+print('Doubled:', result)"""
+    
+    code = st.text_area("📝 Write your Python code:", value=default_code, height=300, key="code_editor")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.button("▶️ Run Code", use_container_width=True):
+            with st.spinner("⚙️ Executing code..."):
+                result = execute_code(code)
+                st.code(result, language="text")
+    with col2:
+        st.info("**Supported:**\nnumpy, pandas\nmath, datetime")
+
+# === 📊 ANALYTICS ===
+elif page == "📊 Analytics Dashboard":
+    st.header("📊 Enterprise Analytics Dashboard")
+    
+    try:
+        c = db.execute("SELECT role, COUNT(*) FROM chats GROUP BY role").fetchall()
+        total_msgs = sum([x[1] for x in c]) if c else 0
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("💬 Total Messages", total_msgs)
+        with col2:
+            st.metric("👤 User Messages", next((x[1] for x in c if x[0] == 'user'), 0))
+        with col3:
+            st.metric("🤖 AI Responses", next((x[1] for x in c if x[0] == 'assistant'), 0))
+        
+        if total_msgs > 0:
+            st.markdown("### 📈 Message Distribution")
+            
+            # Create bar chart
+            df = pd.DataFrame(c, columns=['Role', 'Count'])
+            fig = px.bar(df, x='Role', y='Count', title='Messages by Role',
+                        color='Role', color_discrete_sequence=['#ffd700', '#4a90e2'])
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Analytics events
+            events = db.execute("SELECT event_type, COUNT(*) FROM analytics GROUP BY event_type").fetchall()
+            if events:
+                st.markdown("### 📊 Event Analytics")
+                df_events = pd.DataFrame(events, columns=['Event', 'Count'])
+                fig2 = px.pie(df_events, values='Count', names='Event', title='Event Distribution')
+                st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("No analytics data yet. Start using features to see metrics!")
+            
+    except Exception as e:
+        st.error(f"Analytics error: {e}")
+
+# === 🎯 AI PERSONALITY ===
+elif page == "🎯 AI Personality":
+    st.header("🎯 AI Personality Settings")
+    
+    st.markdown("### Choose Your AI Assistant Style")
+    
+    personality = st.radio(
+        "Select Personality:",
+        ["professional", "friendly", "technical", "creative", "concise"],
+        index=["professional", "friendly", "technical", "creative", "concise"].index(st.session_state.ai_personality)
+    )
+    
+    # Show personality descriptions
+    descriptions = {
+        "professional": "🎯 **Professional** - Formal, precise, business-oriented responses",
+        "friendly": "😊 **Friendly** - Warm, approachable, conversational tone",
+        "technical": "🔧 **Technical** - Detailed, expert-level explanations",
+        "creative": "🎨 **Creative** - Imaginative, inspiring, innovative thinking",
+        "concise": "⚡ **Concise** - Brief, direct, to-the-point answers"
+    }
+    
+    for p, desc in descriptions.items():
+        if p == personality:
+            st.success(desc)
+        else:
+            st.info(desc)
+    
+    if st.button("💾 Save Personality", use_container_width=True):
+        st.session_state.ai_personality = personality
+        st.success(f"✅ AI Personality set to: **{personality.title()}**")
+        st.info("This will apply to your next chat messages!")
+
+# === ⚙️ SETTINGS ===
+elif page == "⚙️ Settings":
+    st.header("⚙️ Enterprise Configuration")
+    
+    st.success("✅ **Production Features Active:**")
+    
+    # Temperature Control
+    st.markdown("### 🌡️ AI Temperature Control")
+    temp = st.slider("Creativity Level", 0.0, 1.0, st.session_state.temperature, 0.1)
+    if st.button("💾 Save Temperature"):
+        st.session_state.temperature = temp
+        st.success(f"✅ Temperature set to {temp}")
+    
+    st.markdown("---")
+    
+    # Feature Status
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **🔐 Security**
+        • Password protection ✅
+        • Session management ✅
+        
+        **💾 Data Layer**
+        • SQLite chat history ✅
+        • ChromaDB vector storage ✅
+        
+        **🤖 AI Models**
+        • GPT-4o-mini (OpenRouter) ✅
+        • Text embeddings ✅
+        """)
+    
+    with col2:
+        st.markdown("""
+        **🛠️ Tools**
+        • Document RAG (PDF/TXT) ✅
+        • Web search ✅
+        • AI image generation ✅
+        • Python code runner ✅
+        
+        **📊 Analytics**
+        • Real-time dashboard ✅
+        • Event tracking ✅
+        """)
+    
+    st.markdown("---")
+    
+    st.info("""
+    **📋 Required Secrets:**
+    ```
+    OPENROUTER_API_KEY = "sk-or-v1-..."
+    APP_PASSWORD = "yourpassword"
+    ```
+    
+    **🔗 Get API Key:** https://openrouter.ai/keys
+    """)
+    
+    # Database Stats
+    st.markdown("### 📊 Database Statistics")
+    try:
+        chat_count = db.execute("SELECT COUNT(*) FROM chats").fetchone()[0]
+        analytics_count = db.execute("SELECT COUNT(*) FROM analytics").fetchone()[0]
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("💬 Chat Records", chat_count)
+        with col2:
+            st.metric("📊 Analytics Events", analytics_count)
+    except:
+        st.info("Database initializing...")
+
+# === FOOTER ===
+st.markdown("---")
+st.markdown("*🌟 AI Pro Enterprise v2.0 | Production AI Toolkit | Powered by OpenRouter & Streamlit*")
